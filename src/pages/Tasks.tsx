@@ -23,7 +23,7 @@ const Tasks = () => {
   ]);
 
   const toggleTask = (id: number) => {
-    setTasks(tasks.map(task => 
+    setTasks(tasks.map(task =>
       task.id === id ? { ...task, completed: !task.completed } : task
     ));
   };
@@ -68,7 +68,7 @@ const Tasks = () => {
       {/* Task List */}
       <div className="space-y-3">
         {tasks.map((task, index) => (
-          <Card 
+          <Card
             key={task.id}
             className={cn(
               "p-4 transition-all hover:shadow-md cursor-pointer",
@@ -85,7 +85,7 @@ const Tasks = () => {
                   <Circle className="h-6 w-6 text-muted-foreground" />
                 )}
               </div>
-              
+
               <div className="flex-1 min-w-0">
                 <h3 className={cn(
                   "font-semibold text-foreground mb-1",
@@ -112,12 +112,27 @@ const Tasks = () => {
       </div>
 
       {/* Add Task Button */}
-      <Button 
+
+      <Button
         className="w-full h-14 text-base font-semibold bg-gradient-to-r from-primary to-accent hover:opacity-90 transition-opacity shadow-lg"
+        onClick={() => {
+          const newId = tasks.length ? tasks[tasks.length - 1].id + 1 : 1;
+          setTasks([
+            ...tasks,
+            {
+              id: newId,
+              title: "New Task",
+              timeBlock: "00:00 - 00:00",
+              completed: false,
+              category: "personal"
+            }
+          ]);
+        }}
       >
         <Plus className="h-5 w-5 mr-2" />
         Add New Task
       </Button>
+
 
       {/* Info Card */}
       <Card className="p-5 bg-muted/50">
