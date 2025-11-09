@@ -25,9 +25,13 @@ app.use(cors({
     // Allow requests with no origin (mobile apps, Postman, etc.)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.includes(origin)) {
+    // In production, check if origin matches allowed origins
+    if (allowedOrigins.some(allowed => origin?.startsWith(allowed))) {
       callback(null, true);
     } else {
+      // Log the rejected origin for debugging
+      console.log('CORS rejected origin:', origin);
+      console.log('Allowed origins:', allowedOrigins);
       callback(new Error('Not allowed by CORS'));
     }
   },
