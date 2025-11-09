@@ -1,149 +1,286 @@
-import { Plus, Clock, CheckCircle2, Circle } from "lucide-react";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { useState } from "react";
-import { cn } from "@/lib/utils";
-
-interface Task {
-  id: number;
-  title: string;
-  timeBlock: string;
-  completed: boolean;
-  category: "work" | "personal" | "wellness";
-}
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Trash2, Plus, Calendar, Clock, AlertCircle } from 'lucide-react';
+import { taskStorage, Task } from '@/lib/taskStorage';
+import { useToast } from '@/hooks/use-toast';
+import { format, formatDistanceToNow, isPast, isFuture } from 'date-fns';
 
 const Tasks = () => {
-  const [tasks, setTasks] = useState<Task[]>([
-    { id: 1, title: "Morning meditation", timeBlock: "08:00 - 08:30", completed: true, category: "wellness" },
-    { id: 2, title: "Project review", timeBlock: "09:00 - 11:00", completed: true, category: "work" },
-    { id: 3, title: "Lunch break (no phone)", timeBlock: "12:00 - 13:00", completed: false, category: "wellness" },
-    { id: 4, title: "Deep work session", timeBlock: "14:00 - 16:00", completed: false, category: "work" },
-    { id: 5, title: "Exercise", timeBlock: "18:00 - 19:00", completed: false, category: "wellness" },
-    { id: 6, title: "Family time", timeBlock: "19:30 - 21:00", completed: false, category: "personal" },
-  ]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskDeadline, setNewTaskDeadline] = useState('');
+  const { toast } = useToast();
 
-  const toggleTask = (id: number) => {
-    setTasks(tasks.map(task =>
-      task.id === id ? { ...task, completed: !task.completed } : task
-    ));
+  useEffect(() => {
+    taskStorage.checkOverdue();
+    setTasks(taskStorage.getTasks());
+    
+    // Check for overdue tasks every minute
+    const interval = setInterval(() => {
+      taskStorage.checkOverdue();
+      setTasks(taskStorage.getTasks());
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleAddTask = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTaskTitle.trim() || !newTaskDeadline) return;
+
+    const deadlineDate = new Date(newTaskDeadline);
+    const now = new Date();
+
+    if (deadlineDate <= now) {
+      toast({
+        title: 'Invalid deadline',
+        description: 'Deadline must be in the future.',
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    const task = taskStorage.addTask({
+      title: newTaskTitle,
+      deadline: deadlineDate.toISOString(),
+      completed: false
+    });
+
+    setTasks([...tasks, task]);
+    setNewTaskTitle('');
+    setNewTaskDeadline('');
+
+    toast({
+      title: 'Task added',
+      description: `"${task.title}" is due ${formatDistanceToNow(deadlineDate, { addSuffix: true })}`
+    });
   };
 
-  const categoryColors = {
-    work: "bg-primary/10 text-primary",
-    personal: "bg-accent/10 text-accent",
-    wellness: "bg-secondary/10 text-secondary"
+  const handleToggleComplete = (id: string) => {
+    taskStorage.toggleComplete(id);
+    setTasks(taskStorage.getTasks());
   };
 
-  const completedCount = tasks.filter(t => t.completed).length;
+  const handleDeleteTask = (id: string, title: string) => {
+    taskStorage.deleteTask(id);
+    setTasks(taskStorage.getTasks());
+    toast({
+      title: 'Task deleted',
+      description: `"${title}" has been removed.`
+    });
+  };
+
+  const completedTasks = tasks.filter(t => t.completed);
+  const overdueTasks = tasks.filter(t => !t.completed && t.isOverdue);
+  const upcomingTasks = tasks.filter(t => !t.completed && !t.isOverdue);
+
+  // Get minimum datetime for input (current time)
+  const getMinDateTime = () => {
+    const now = new Date();
+    now.setMinutes(now.getMinutes() + 1); // At least 1 minute in future
+    return now.toISOString().slice(0, 16);
+  };
+
+  const getDeadlineStatus = (task: Task) => {
+    if (task.completed) return 'completed';
+    if (task.isOverdue) return 'overdue';
+    
+    const deadline = new Date(task.deadline);
+    const now = new Date();
+    const hoursUntil = (deadline.getTime() - now.getTime()) / (1000 * 60 * 60);
+    
+    if (hoursUntil < 24) return 'urgent';
+    return 'normal';
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'text-green-600';
+      case 'overdue': return 'text-red-600';
+      case 'urgent': return 'text-orange-600';
+      default: return 'text-blue-600';
+    }
+  };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-foreground mb-2">
-          Task Schedule
-        </h1>
-        <p className="text-muted-foreground">
-          Time-block your day to reduce digital distractions
+        <h1 className="text-3xl font-bold">Task Manager</h1>
+        <p className="text-muted-foreground">Track tasks with deadlines</p>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Add New Task</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleAddTask} className="space-y-3">
+            <Input
+              placeholder="Task title"
+              value={newTaskTitle}
+              onChange={(e) => setNewTaskTitle(e.target.value)}
+              required
+            />
+            <div className="flex gap-3">
+              <Input
+                type="datetime-local"
+                value={newTaskDeadline}
+                onChange={(e) => setNewTaskDeadline(e.target.value)}
+                min={getMinDateTime()}
+                required
+                className="flex-1"
+              />
+              <Button type="submit">
+                <Plus className="w-4 h-4 mr-2" />
+                Add
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Completed</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-green-600">{completedTasks.length}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Upcoming</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-blue-600">{upcomingTasks.length}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Overdue</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-red-600">{overdueTasks.length}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {overdueTasks.length > 0 && (
+        <Card className="border-red-200 bg-red-50">
+          <CardHeader>
+            <CardTitle className="text-red-700 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5" />
+              Overdue Tasks
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {overdueTasks.map((task) => (
+                <TaskItem
+                  key={task.id}
+                  task={task}
+                  onToggle={handleToggleComplete}
+                  onDelete={handleDeleteTask}
+                  status={getDeadlineStatus(task)}
+                  statusColor={getStatusColor(getDeadlineStatus(task))}
+                />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>All Tasks</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {tasks.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">No tasks yet. Add one above!</p>
+          ) : (
+            <div className="space-y-3">
+              {tasks
+                .sort((a, b) => {
+                  if (a.completed !== b.completed) return a.completed ? 1 : -1;
+                  return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+                })
+                .map((task) => (
+                  <TaskItem
+                    key={task.id}
+                    task={task}
+                    onToggle={handleToggleComplete}
+                    onDelete={handleDeleteTask}
+                    status={getDeadlineStatus(task)}
+                    statusColor={getStatusColor(getDeadlineStatus(task))}
+                  />
+                ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+interface TaskItemProps {
+  task: Task;
+  onToggle: (id: string) => void;
+  onDelete: (id: string, title: string) => void;
+  status: string;
+  statusColor: string;
+}
+
+const TaskItem = ({ task, onToggle, onDelete, status, statusColor }: TaskItemProps) => {
+  const deadline = new Date(task.deadline);
+  const now = new Date();
+  const isPastDeadline = isPast(deadline) && !task.completed;
+
+  return (
+    <div
+      className={`flex items-start gap-3 p-3 border rounded-lg hover:bg-accent/50 transition-colors ${
+        isPastDeadline ? 'border-red-300 bg-red-50/50' : ''
+      }`}
+    >
+      <Checkbox
+        checked={task.completed}
+        onCheckedChange={() => onToggle(task.id)}
+        className="mt-1"
+      />
+      <div className="flex-1 min-w-0">
+        <p className={task.completed ? 'line-through text-muted-foreground' : 'font-medium'}>
+          {task.title}
         </p>
-      </div>
-
-      {/* Progress Card */}
-      <Card className="p-5 bg-gradient-to-br from-primary/10 to-accent/10 border-primary/20">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-muted-foreground mb-1">Today's Progress</p>
-            <p className="text-3xl font-bold text-foreground">
-              {completedCount}/{tasks.length}
-            </p>
-            <p className="text-sm text-muted-foreground mt-1">tasks completed</p>
-          </div>
-          <div className="text-right">
-            <div className="text-5xl font-bold text-primary">
-              {Math.round((completedCount / tasks.length) * 100)}%
-            </div>
-          </div>
+        <div className="flex items-center gap-3 mt-1 text-sm flex-wrap">
+          <span className={`flex items-center gap-1 ${statusColor}`}>
+            <Calendar className="w-3 h-3" />
+            {format(deadline, 'MMM dd, yyyy')}
+          </span>
+          <span className={`flex items-center gap-1 ${statusColor}`}>
+            <Clock className="w-3 h-3" />
+            {format(deadline, 'hh:mm a')}
+          </span>
+          {!task.completed && (
+            <span className={`text-xs ${statusColor} font-medium`}>
+              {isPastDeadline
+                ? `Overdue by ${formatDistanceToNow(deadline)}`
+                : formatDistanceToNow(deadline, { addSuffix: true })}
+            </span>
+          )}
         </div>
-      </Card>
-
-      {/* Task List */}
-      <div className="space-y-3">
-        {tasks.map((task, index) => (
-          <Card
-            key={task.id}
-            className={cn(
-              "p-4 transition-all hover:shadow-md cursor-pointer",
-              task.completed && "opacity-60"
-            )}
-            style={{ animationDelay: `${index * 50}ms` }}
-            onClick={() => toggleTask(task.id)}
-          >
-            <div className="flex items-start gap-3">
-              <div className="pt-1">
-                {task.completed ? (
-                  <CheckCircle2 className="h-6 w-6 text-primary fill-current" />
-                ) : (
-                  <Circle className="h-6 w-6 text-muted-foreground" />
-                )}
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <h3 className={cn(
-                  "font-semibold text-foreground mb-1",
-                  task.completed && "line-through"
-                )}>
-                  {task.title}
-                </h3>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                    <Clock className="h-4 w-4" />
-                    <span>{task.timeBlock}</span>
-                  </div>
-                  <span className={cn(
-                    "text-xs px-2 py-1 rounded-full font-medium",
-                    categoryColors[task.category]
-                  )}>
-                    {task.category}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </Card>
-        ))}
       </div>
-
-      {/* Add Task Button */}
-
       <Button
-        className="w-full h-14 text-base font-semibold bg-gradient-to-r from-primary to-accent hover:opacity-90 transition-opacity shadow-lg"
-        onClick={() => {
-          const newId = tasks.length ? tasks[tasks.length - 1].id + 1 : 1;
-          setTasks([
-            ...tasks,
-            {
-              id: newId,
-              title: "New Task",
-              timeBlock: "00:00 - 00:00",
-              completed: false,
-              category: "personal"
-            }
-          ]);
-        }}
+        variant="ghost"
+        size="icon"
+        onClick={() => onDelete(task.id, task.title)}
       >
-        <Plus className="h-5 w-5 mr-2" />
-        Add New Task
+        <Trash2 className="w-4 h-4 text-destructive" />
       </Button>
-
-
-      {/* Info Card */}
-      <Card className="p-5 bg-muted/50">
-        <h3 className="font-semibold text-foreground mb-2">📅 Time Blocking Benefits</h3>
-        <ul className="text-sm text-muted-foreground space-y-1">
-          <li>• Reduces decision fatigue</li>
-          <li>• Prevents mindless phone usage</li>
-          <li>• Increases productivity by 40%</li>
-          <li>• Creates healthy digital boundaries</li>
-        </ul>
-      </Card>
     </div>
   );
 };

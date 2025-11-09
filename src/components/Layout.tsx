@@ -1,6 +1,7 @@
-import { Home, CheckSquare, Focus, BarChart3 } from "lucide-react";
-import { Link, useLocation } from "react-router-dom";
+import { Home, CheckSquare, Focus, BarChart3, LogOut } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -8,6 +9,7 @@ interface LayoutProps {
 
 const Layout = ({ children }: LayoutProps) => {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const navItems = [
     { path: "/", icon: Home, label: "Home" },
@@ -16,8 +18,28 @@ const Layout = ({ children }: LayoutProps) => {
     { path: "/stats", icon: BarChart3, label: "Stats" },
   ];
 
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    navigate('/login');
+  };
+
+  const user = JSON.parse(localStorage.getItem('user') || '{}');
+
   return (
     <div className="min-h-screen bg-background pb-20">
+      <header className="border-b bg-card/50 backdrop-blur-sm sticky top-0 z-10">
+        <div className="container max-w-md mx-auto px-4 py-3 flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-sm">Digital Wellness</h2>
+            <p className="text-xs text-muted-foreground">Hi, {user.name || 'User'}</p>
+          </div>
+          <Button variant="ghost" size="icon" onClick={handleLogout}>
+            <LogOut className="h-4 w-4" />
+          </Button>
+        </div>
+      </header>
+
       <main className="container max-w-md mx-auto px-4 py-6">
         {children}
       </main>
