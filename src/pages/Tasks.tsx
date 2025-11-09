@@ -4,30 +4,41 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Trash2, Plus, Calendar, Clock, AlertCircle } from 'lucide-react';
-import { taskStorage, Task } from '@/lib/taskStorage';
+import { api, Task } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
-import { format, formatDistanceToNow, isPast, isFuture } from 'date-fns';
+import { format, formatDistanceToNow, isPast } from 'date-fns';
 
 const Tasks = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [newTaskDeadline, setNewTaskDeadline] = useState('');
+  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
-  useEffect(() => {
-    taskStorage.checkOverdue();
-    setTasks(taskStorage.getTasks());
-    
-    // Check for overdue tasks every minute
-    const interval = setInterval(() => {
-      taskStorage.checkOverdue();
-      setTasks(taskStorage.getTasks());
-    }, 60000);
+  const fetchTasks = async () => {
+    try {
+      const data = await api.getTasks();
+      setTasks(data);
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive'
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
+    fetchTasks();
+    
+    // Refresh tasks every minute to update overdue status
+    const interval = setInterval(fetchTasks, 60000);
     return () => clearInterval(interval);
   }, []);
 
-  const handleAddTask = (e: React.FormEvent) => {
+  const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTaskTitle.trim() || !newTaskDeadline) return;
 
@@ -43,44 +54,62 @@ const Tasks = () => {
       return;
     }
 
-    const task = taskStorage.addTask({
-      title: newTaskTitle,
-      deadline: deadlineDate.toISOString(),
-      completed: false
-    });
+    try {
+      const task = await api.createTask(newTaskTitle, deadlineDate.toISOString());
+      setTasks([...tasks, task]);
+      setNewTaskTitle('');
+      setNewTaskDeadline('');
 
-    setTasks([...tasks, task]);
-    setNewTaskTitle('');
-    setNewTaskDeadline('');
-
-    toast({
-      title: 'Task added',
-      description: `"${task.title}" is due ${formatDistanceToNow(deadlineDate, { addSuffix: true })}`
-    });
+      toast({
+        title: 'Task added',
+        description: `"${task.title}" is due ${formatDistanceToNow(deadlineDate, { addSuffix: true })}`
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive'
+      });
+    }
   };
 
-  const handleToggleComplete = (id: string) => {
-    taskStorage.toggleComplete(id);
-    setTasks(taskStorage.getTasks());
+  const handleToggleComplete = async (task: Task) => {
+    try {
+      const updated = await api.updateTask(task._id!, { completed: !task.completed });
+      setTasks(tasks.map(t => t._id === updated._id ? updated : t));
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive'
+      });
+    }
   };
 
-  const handleDeleteTask = (id: string, title: string) => {
-    taskStorage.deleteTask(id);
-    setTasks(taskStorage.getTasks());
-    toast({
-      title: 'Task deleted',
-      description: `"${title}" has been removed.`
-    });
+  const handleDeleteTask = async (id: string, title: string) => {
+    try {
+      await api.deleteTask(id);
+      setTasks(tasks.filter(t => t._id !== id));
+      toast({
+        title: 'Task deleted',
+        description: `"${title}" has been removed.`
+      });
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.message,
+        variant: 'destructive'
+      });
+    }
   };
 
   const completedTasks = tasks.filter(t => t.completed);
   const overdueTasks = tasks.filter(t => !t.completed && t.isOverdue);
   const upcomingTasks = tasks.filter(t => !t.completed && !t.isOverdue);
 
-  // Get minimum datetime for input (current time)
   const getMinDateTime = () => {
     const now = new Date();
-    now.setMinutes(now.getMinutes() + 1); // At least 1 minute in future
+    now.setMinutes(now.getMinutes() + 1);
     return now.toISOString().slice(0, 16);
   };
 
@@ -104,6 +133,14 @@ const Tasks = () => {
       default: return 'text-blue-600';
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <p className="text-muted-foreground">Loading tasks...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -183,7 +220,7 @@ const Tasks = () => {
             <div className="space-y-3">
               {overdueTasks.map((task) => (
                 <TaskItem
-                  key={task.id}
+                  key={task._id}
                   task={task}
                   onToggle={handleToggleComplete}
                   onDelete={handleDeleteTask}
@@ -212,7 +249,7 @@ const Tasks = () => {
                 })
                 .map((task) => (
                   <TaskItem
-                    key={task.id}
+                    key={task._id}
                     task={task}
                     onToggle={handleToggleComplete}
                     onDelete={handleDeleteTask}
@@ -230,7 +267,7 @@ const Tasks = () => {
 
 interface TaskItemProps {
   task: Task;
-  onToggle: (id: string) => void;
+  onToggle: (task: Task) => void;
   onDelete: (id: string, title: string) => void;
   status: string;
   statusColor: string;
@@ -238,7 +275,6 @@ interface TaskItemProps {
 
 const TaskItem = ({ task, onToggle, onDelete, status, statusColor }: TaskItemProps) => {
   const deadline = new Date(task.deadline);
-  const now = new Date();
   const isPastDeadline = isPast(deadline) && !task.completed;
 
   return (
@@ -249,7 +285,7 @@ const TaskItem = ({ task, onToggle, onDelete, status, statusColor }: TaskItemPro
     >
       <Checkbox
         checked={task.completed}
-        onCheckedChange={() => onToggle(task.id)}
+        onCheckedChange={() => onToggle(task)}
         className="mt-1"
       />
       <div className="flex-1 min-w-0">
@@ -277,7 +313,7 @@ const TaskItem = ({ task, onToggle, onDelete, status, statusColor }: TaskItemPro
       <Button
         variant="ghost"
         size="icon"
-        onClick={() => onDelete(task.id, task.title)}
+        onClick={() => onDelete(task._id!, task.title)}
       >
         <Trash2 className="w-4 h-4 text-destructive" />
       </Button>

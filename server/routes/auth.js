@@ -1,11 +1,9 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import User from '../models/User.js';
 
 const router = express.Router();
-
-// In-memory user storage (replace with DB in production)
-const users = new Map();
 
 // Sign up
 router.post('/signup', async (req, res) => {
@@ -16,24 +14,27 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
-    if (users.has(email)) {
+    // Check if user exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
       return res.status(400).json({ error: 'User already exists' });
     }
 
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
     
-    const user = {
-      id: Date.now().toString(),
+    // Create user
+    const user = new User({
       email,
       name,
-      password: hashedPassword,
-      createdAt: new Date().toISOString()
-    };
+      password: hashedPassword
+    });
 
-    users.set(email, user);
+    await user.save();
 
+    // Generate token
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { userId: user._id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -41,9 +42,10 @@ router.post('/signup', async (req, res) => {
     res.status(201).json({
       message: 'User created successfully',
       token,
-      user: { id: user.id, email: user.email, name: user.name }
+      user: { id: user._id, email: user.email, name: user.name }
     });
   } catch (error) {
+    console.error('Signup error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -57,18 +59,21 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const user = users.get(email);
+    // Find user
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password);
     if (!isValidPassword) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
+    // Generate token
     const token = jwt.sign(
-      { userId: user.id, email: user.email },
+      { userId: user._id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
@@ -76,9 +81,10 @@ router.post('/login', async (req, res) => {
     res.json({
       message: 'Login successful',
       token,
-      user: { id: user.id, email: user.email, name: user.name }
+      user: { id: user._id, email: user.email, name: user.name }
     });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
